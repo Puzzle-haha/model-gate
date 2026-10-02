@@ -145,4 +145,90 @@ class SimpleCircuitBreakerTest {
         assertThat(breaker.consecutiveFailures()).isZero();
         assertThat(breaker.allowRequest()).isTrue();
     }
+
+    // ================================================================
+    //  HALF_OPEN 超时兜底 —— 守护"状态机永久卡死"这个静默故障
+    // ================================================================
+
+    @Test
+    @DisplayName("★ 探针永不回报时，不能永久卡在 HALF_OPEN（否则该模型永久不可用）")
+    void probeTimeoutPreventsPermanentLockout() throws InterruptedException {
+        // 冷却 50ms、探针时限 120ms
+        SimpleCircuitBreaker breaker = new SimpleCircuitBreaker(THRESHOLD, 50, 120);
+        for (int i = 0; i < THRESHOLD; i++) {
+            breaker.recordFailure();
+        }
+        assertThat(breaker.state()).isEqualTo(SimpleCircuitBreaker.State.OPEN);
+
+        Thread.sleep(70);
+        assertThat(breaker.allowRequest()).isTrue();
+        assertThat(breaker.state()).isEqualTo(SimpleCircuitBreaker.State.HALF_OPEN);
+
+        // 关键：探针【永远不回调 recordSuccess / recordFailure】
+        Thread.sleep(150);
+
+        // 修复前：永久返回 false，状态永远停在 HALF_OPEN
+        // 修复后：退回 OPEN，重新开始冷却
+        assertThat(breaker.allowRequest()).isFalse();
+        assertThat(breaker.state())
+                .as("探针超时后必须退回 OPEN，不能停在 HALF_OPEN")
+                .isEqualTo(SimpleCircuitBreaker.State.OPEN);
+    }
+
+    @Test
+    @DisplayName("★ 探针超时退回 OPEN 后，再等一个冷却期仍能重新试探（说明没有死锁）")
+    void recoversAfterProbeTimeout() throws InterruptedException {
+        SimpleCircuitBreaker breaker = new SimpleCircuitBreaker(THRESHOLD, 50, 120);
+        for (int i = 0; i < THRESHOLD; i++) {
+            breaker.recordFailure();
+        }
+
+        Thread.sleep(70);
+        assertThat(breaker.allowRequest()).isTrue();   // 探针 1
+        Thread.sleep(150);                             // 探针 1 从未回报 → 超时
+        assertThat(breaker.allowRequest()).isFalse();  // 退回 OPEN
+
+        Thread.sleep(70);                              // 再等一个冷却期
+        assertThat(breaker.allowRequest())
+                .as("必须能重新放行探针，否则这个模型就永久不可用了")
+                .isTrue();
+
+        // 这次的探针正常回报成功 → 完全恢复
+        breaker.recordSuccess();
+        assertThat(breaker.state()).isEqualTo(SimpleCircuitBreaker.State.CLOSED);
+    }
+
+    @Test
+    @DisplayName("探针在时限内正常回报时，超时逻辑不干扰它")
+    void probeReportingWithinTimeoutIsHonored() throws InterruptedException {
+        SimpleCircuitBreaker breaker = new SimpleCircuitBreaker(THRESHOLD, 50, 5000);
+        for (int i = 0; i < THRESHOLD; i++) {
+            breaker.recordFailure();
+        }
+
+        Thread.sleep(70);
+        assertThat(breaker.allowRequest()).isTrue();
+        assertThat(breaker.state()).isEqualTo(SimpleCircuitBreaker.State.HALF_OPEN);
+
+        breaker.recordSuccess();
+
+        assertThat(breaker.state()).isEqualTo(SimpleCircuitBreaker.State.CLOSED);
+        assertThat(breaker.allowRequest()).isTrue();
+    }
+
+    @Test
+    @DisplayName("默认构造的探针时限不小于 30 秒（必须明显大于任何合理的调用超时）")
+    void defaultProbeTimeoutIsGenerous() {
+        // 这个约束的理由见类注释：探针时限若短于真实调用超时，
+        // 就可能放开第二个探针，破坏"单探针"的严格性。
+        // 用"短暂多一个探针"换"绝不永久卡死"是刻意的取舍，
+        // 但前提是时限足够长，不至于在正常情况下误触发。
+        SimpleCircuitBreaker breaker = new SimpleCircuitBreaker(THRESHOLD, 1000);
+        assertThat(breaker.probeTimeoutMs()).isGreaterThanOrEqualTo(30_000L);
+
+        SimpleCircuitBreaker longCooldown = new SimpleCircuitBreaker(THRESHOLD, 60_000);
+        assertThat(longCooldown.probeTimeoutMs())
+                .as("冷却时长更长时，探针时限应不小于冷却时长")
+                .isGreaterThanOrEqualTo(60_000L);
+    }
 }

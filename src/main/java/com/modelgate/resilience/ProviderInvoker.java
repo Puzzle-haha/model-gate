@@ -106,38 +106,65 @@ public class ProviderInvoker {
         String lastErrorType = null;
         int attemptsMade = 0;
 
-        for (int n = 1; n <= maxAttempts; n++) {
-            attemptsMade = n;
-            try {
-                ProviderResponse response = callWithTimeout(provider, request, pool, timeoutMs, cancelOnTimeout);
-                breaker.recordSuccess();
-                trace.add("第 " + n + " 次尝试：成功（实际模型 " + response.model() + "）");
-                return build(true, false, response, response.content(),
-                        null, null, n, startedAt, breaker, trace);
-            } catch (LlmCallException e) {
-                lastError = e.getMessage();
-                lastErrorType = e.errorType();
-                trace.add("第 " + n + " 次尝试：" + e.getMessage());
+        // 熔断器是否已经收到过回报。
+        // 兜底逻辑见下面的 finally —— 它守护的是"HALF_OPEN 卡死"这个缺陷。
+        boolean breakerReported = false;
 
-                if (!e.isRetryable()) {
+        try {
+            for (int n = 1; n <= maxAttempts; n++) {
+                attemptsMade = n;
+                try {
+                    ProviderResponse response = callWithTimeout(provider, request, pool, timeoutMs, cancelOnTimeout);
+                    breaker.recordSuccess();
+                    breakerReported = true;
+                    trace.add("第 " + n + " 次尝试：成功（实际模型 " + response.model() + "）");
+                    return build(true, false, response, response.content(),
+                            null, null, n, startedAt, breaker, trace);
+                } catch (LlmCallException e) {
+                    lastError = e.getMessage();
+                    lastErrorType = e.errorType();
+                    trace.add("第 " + n + " 次尝试：" + e.getMessage());
+
+                    if (!e.isRetryable()) {
+                        breaker.recordFailure();
+                        breakerReported = true;
+                        trace.add("该错误标记为不可重试，立即放弃（不浪费后续尝试）");
+                        break;
+                    }
+
                     breaker.recordFailure();
-                    trace.add("该错误标记为不可重试，立即放弃（不浪费后续尝试）");
-                    break;
-                }
+                    breakerReported = true;
 
-                breaker.recordFailure();
-
-                if (n < maxAttempts) {
-                    long wait = backoffMs(n);
-                    trace.add("退避 " + wait + "ms 后重试");
-                    sleepQuietly(wait);
+                    if (n < maxAttempts) {
+                        long wait = backoffMs(n);
+                        trace.add("退避 " + wait + "ms 后重试");
+                        sleepQuietly(wait);
+                    }
                 }
             }
-        }
 
-        trace.add("尝试耗尽，返回降级内容");
-        return build(false, true, null, fallbackText(),
-                lastError, lastErrorType, attemptsMade, startedAt, breaker, trace);
+            trace.add("尝试耗尽，返回降级内容");
+            return build(false, true, null, fallbackText(),
+                    lastError, lastErrorType, attemptsMade, startedAt, breaker, trace);
+        } finally {
+            // ================================================================
+            // 兜底：保证熔断器【一定】收到回报。
+            //
+            // 上面只捕获 LlmCallException。如果抛出的是别的异常
+            // （未检查异常、CancellationException、或 build/trace 自身出错），
+            // 就会跳过 recordFailure —— 而熔断器此时可能正处于 HALF_OPEN
+            // 等着这个回报。等不到，它就永久卡在 HALF_OPEN，
+            // 这个 (供应商, 模型) 就永久不可用了，而且不会有任何告警。
+            //
+            // 所以这里必须兜住。就算这个异常本身会导致本次请求失败，
+            // 也不能让它顺带把熔断器打死。
+            // ================================================================
+            if (!breakerReported) {
+                breaker.recordFailure();
+                log.warn("熔断器 {} 未收到正常回报（调用链抛出了未预期异常），已兜底记一次失败，"
+                        + "避免其永久卡在 HALF_OPEN", breakerKey);
+            }
+        }
     }
 
     /**

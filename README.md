@@ -2,7 +2,7 @@
 
 **多模型 LLM 调用网关：可靠、可计量、可用数据选型。**
 
-[![Java](https://img.shields.io/badge/Java-21-blue)]() [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.16-green)]() [![MySQL](https://img.shields.io/badge/MySQL-8.0-orange)]() [![Redis](https://img.shields.io/badge/Redis-5.0-red)]() [![CI](https://github.com/Puzzle-haha/model-gate/actions/workflows/ci.yml/badge.svg)](https://github.com/Puzzle-haha/model-gate/actions/workflows/ci.yml)
+[![Java](https://img.shields.io/badge/Java-21-blue)]() [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.16-green)]() [![MySQL](https://img.shields.io/badge/MySQL-8.0-orange)]() [![Redis](https://img.shields.io/badge/Redis-5.0-red)]() [![CI](https://github.com/Puzzle-haha/model-gate/actions/workflows/ci.yml/badge.svg)](https://github.com/Puzzle-haha/model-gate/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > 仓库地址：**https://github.com/Puzzle-haha/model-gate**
 
@@ -744,4 +744,16 @@ model-gate/
 | **M4** | 响应缓存与成本核算 | 缓存命中率、成本降幅 | ✅ 完成 |
 | **M5** | 可观测性与 Dashboard | 指标看板、P50/P95/P99 | ✅ 完成 |
 | **M6** | 评测集与模型质量回归 | 各模型准确率/成本对比 | ✅ 完成 |
-| **M7** | 压测、部署上线、简历文案 | 线上地址 | 进行中 |
+| **M7** | 压测、部署上线、简历文案 | 线上地址 | 压测 ✅ / 文案 ✅ / 部署 见 [docs/10-deploy.md](docs/10-deploy.md) |
+
+---
+
+## 许可
+
+[MIT License](LICENSE) —— 可以自由使用、修改、分发，包括商用。
+
+选 MIT 的理由很简单：**作品集项目的价值在于被人看见和使用，不在于保留权利。**
+如果面试官或同行想把这里的某段设计拿走用，MIT 让他们不必先来问。
+
+唯一的义务是保留版权声明。软件按"原样"提供，不含任何担保。
+
