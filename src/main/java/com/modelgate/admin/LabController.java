@@ -167,11 +167,19 @@ public class LabController {
     public Map<String, Object> stats() {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("providers", invoker.stats());
-        Map<String, Object> config = new LinkedHashMap<>();
-        config.put("timeoutMs", invoker.configuredTimeoutMs());
-        config.put("maxAttempts", invoker.configuredMaxAttempts());
-        config.put("cancelOnTimeout", invoker.configuredCancelOnTimeout());
-        result.put("config", config);
+
+        // 字段名刻意叫 globalConfig 而不是 config。
+        //
+        // 这里报告的是【全局默认值】，不反映单次请求的覆盖参数。
+        // 之前叫 config，做隔离实验时会出现很迷惑的现象：
+        // 明明传了 cancelOnTimeout=false，返回的 config 却显示 true ——
+        // 因为读的是全局默认，不是本次取值。字段名和内容对不上，
+        // 会让做实验的人怀疑自己的操作，而不是怀疑这个字段。
+        Map<String, Object> globalConfig = new LinkedHashMap<>();
+        globalConfig.put("timeoutMs", invoker.configuredTimeoutMs());
+        globalConfig.put("maxAttempts", invoker.configuredMaxAttempts());
+        globalConfig.put("cancelOnTimeout", invoker.configuredCancelOnTimeout());
+        result.put("globalConfig", globalConfig);
         return result;
     }
 
@@ -283,6 +291,16 @@ public class LabController {
         out.put("taskFailed", taskFailed);
         out.put("wallMs", System.currentTimeMillis() - t0);
         out.put("maxSingleElapsedMs", maxSingle);
+
+        // 本次请求实际传入的覆盖参数。null = 未指定，会回落到 globalConfig。
+        // 必须和 statsAfter.globalConfig 一起看才有意义 ——
+        // 只看 globalConfig 会误以为覆盖参数没生效。
+        Map<String, Object> requested = new LinkedHashMap<>();
+        requested.put("timeoutMs", timeoutMs);
+        requested.put("maxAttempts", maxAttempts);
+        requested.put("cancelOnTimeout", cancelOnTimeout);
+        out.put("optionsRequested", requested);
+
         out.put("statsAfter", stats());
         return out;
     }

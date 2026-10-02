@@ -557,6 +557,8 @@ OpenAI 兼容入口 + Provider 抽象 + 调用日志 + Flyway 迁移。
 
 ## 快速开始
 
+### Windows
+
 ```powershell
 # 1. 准备配置（首次）
 Copy-Item .env.example .env
@@ -566,32 +568,53 @@ Copy-Item .env.example .env
 .\run.ps1
 ```
 
-`run.ps1` 会从 `.env` 注入环境变量再启动。**密码不进代码、不进 `application.yml`。**
+### Linux / macOS
 
-服务端口 **8081**（8080 被 NVIDIA Broadcast 占用）。
+```bash
+# 1. 准备配置（首次）
+cp .env.example .env
+# 编辑 .env，填入数据库密码
+
+# 2. 启动（把 .env 里的变量注入环境后启动）
+set -a && . ./.env && set +a
+java -jar target/model-gate-0.1.0-SNAPSHOT.jar
+```
+
+`run.ps1` 做的事就是「读 `.env` → 注入环境变量 → 启动」。
+**密码不进代码、不进 `application.yml`，也不进 Git。**
+Linux 上用上面那三行等价，不需要额外脚本。
+
+服务端口 **8081**（8080 被本机的 NVIDIA Broadcast 占用；改 `SERVER_PORT` 即可）。
 
 ### 验证
 
-```powershell
-curl.exe http://127.0.0.1:8081/actuator/health
-curl.exe http://127.0.0.1:8081/api/llm/modes
+```bash
+curl http://127.0.0.1:8081/actuator/health
+curl http://127.0.0.1:8081/api/lab/modes
 ```
+
+> ⚠️ **注意路径是 `/api/lab/*` 不是 `/api/llm/*`。**
+> 早期 Phase 0 实验台用的是 `/api/llm/*`，进入正式项目后统一挪到了 `/api/lab/*`。
+> 如果你的笔记里还是旧路径，会得到 404。
 
 ### 故障注入实验台
 
-```powershell
-# 正常调用
-curl.exe -X POST "http://127.0.0.1:8081/api/llm/ask?mode=OK"
+```bash
+# 正常调用（1 次尝试即成功）
+curl -X POST "http://127.0.0.1:8081/api/lab/ask?model=mock-ok"
 
-# 上游超时 → 重试 → 降级
-curl.exe -X POST "http://127.0.0.1:8081/api/llm/ask?mode=SLOW"
+# 上游超时 → 重试 3 次 → 降级
+curl -X POST "http://127.0.0.1:8081/api/lab/ask?model=mock-slow"
 
-# 鉴权失败（不可重试，只试 1 次）
-curl.exe -X POST "http://127.0.0.1:8081/api/llm/ask?mode=AUTH"
+# 鉴权失败（不可重试，只试 1 次就放弃）
+curl -X POST "http://127.0.0.1:8081/api/lab/ask?model=mock-auth"
 
 # 线程池隔离：正确做法 vs 错误做法
-curl.exe -X POST "http://127.0.0.1:8081/api/llm/load?mode=HANG&count=20&cancelOnTimeout=true"
-curl.exe -X POST "http://127.0.0.1:8081/api/llm/load?mode=HANG&count=20&cancelOnTimeout=false"
+curl -X POST "http://127.0.0.1:8081/api/lab/load?model=mock-hang&count=20&cancelOnTimeout=true"
+curl -X POST "http://127.0.0.1:8081/api/lab/load?model=mock-hang&count=20&cancelOnTimeout=false"
+
+# 看熔断器与线程池状态
+curl http://127.0.0.1:8081/api/lab/stats
 ```
 
 完整的实验协议、实测数据与结论见 **[docs/05-llm-resilience.md](docs/05-llm-resilience.md)**。
