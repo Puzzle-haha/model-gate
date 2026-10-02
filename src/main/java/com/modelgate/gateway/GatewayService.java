@@ -88,6 +88,35 @@ public class GatewayService {
                               Double temperature,
                               Integer maxTokens,
                               String apiKey) {
+        return chat(requestedModel, messages, temperature, maxTokens, apiKey, false);
+    }
+
+    /**
+     * 评测专用入口。
+     *
+     * 与普通请求有两点不同，都是刻意的：
+     *
+     *   1. **绕过缓存**。评测要测的是模型本身的能力，命中缓存等于没测模型。
+     *      同一批任务跑两次，第二次全是缓存命中，准确率会变成假的 100%。
+     *      这是评测里最容易犯、也最隐蔽的错误。
+     *
+     *   2. **绕过限流与配额**。评测是内部批量操作，几十上百次调用会立刻
+     *      撞上为外部租户设的限流。但容错层（重试/熔断）保留 ——
+     *      评测也应该反映真实的容错行为。
+     */
+    public GatewayResult chatForEval(String requestedModel,
+                                     List<ChatMessage> messages,
+                                     Double temperature,
+                                     Integer maxTokens) {
+        return chat(requestedModel, messages, temperature, maxTokens, "__eval__", true);
+    }
+
+    private GatewayResult chat(String requestedModel,
+                               List<ChatMessage> messages,
+                               Double temperature,
+                               Integer maxTokens,
+                               String apiKey,
+                               boolean evalMode) {
 
         String requestId = "mg-" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
@@ -96,7 +125,7 @@ public class GatewayService {
         //    放在后面就失去意义了：那时配额已经花掉、上游已经被打了，
         //    "拒绝"只是事后通知，省不下任何成本。
         // ==================================================================
-        String tenant = guard.checkOrThrow(apiKey);
+        String tenant = evalMode ? "eval" : guard.checkOrThrow(apiKey);
 
         // 2. 模型解析。auto → 配置的默认模型。
         //    「按成本/质量策略选模型」要等 M6 评测有数据之后才能做 ——
@@ -110,9 +139,9 @@ public class GatewayService {
         List<String> failoverTrace = new ArrayList<>();
 
         // ==================================================================
-        // 3. 缓存查找
+        // 3. 缓存查找（评测模式直接跳过，见 chatForEval 的说明）
         // ==================================================================
-        boolean cacheable = cache.isCacheable(providerRequest);
+        boolean cacheable = !evalMode && cache.isCacheable(providerRequest);
         String cacheKey = cacheable ? cache.keyFor(providerRequest, tenant) : null;
 
         if (cacheable) {

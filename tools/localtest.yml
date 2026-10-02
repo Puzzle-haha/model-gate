@@ -21,6 +21,9 @@ modelgate:
 
   # 假上游的单价。用真实量级的数字，这样成本报表跑出来是有意义的数，
   # 而不是一片 0 —— 报表是 0 的时候你没法判断"是没配单价"还是"真的没花钱"。
+  #
+  # 评测模型的单价刻意拉开差距，用来演示"贵模型值不值"：
+  #   eval-strong 贵但准 / eval-weak 中等 / eval-cheap 便宜但不准
   pricing:
     models:
       fake-fast:
@@ -29,6 +32,15 @@ modelgate:
       fake-ok:
         input-per-million: 2.0
         output-per-million: 8.0
+      eval-strong:
+        input-per-million: 8.0
+        output-per-million: 32.0
+      eval-weak:
+        input-per-million: 2.0
+        output-per-million: 8.0
+      eval-cheap:
+        input-per-million: 0.5
+        output-per-million: 2.0
 
   providers:
     # 列表属性是【整体替换】的：这里配了 providers，
@@ -70,6 +82,10 @@ modelgate:
         # 限流和压测场景需要这种"干净"的路径，否则每次都先失败一次，
         # 延迟和调用次数都被污染了
         - fake-fast
+        # 评测用模型：假上游按模型名控制正确率与响应速度
+        - eval-strong
+        - eval-weak
+        - eval-cheap
       # 5 秒：fake-slow(2s) 能过，fake-verySlow(12s) 会超时
       timeout-ms: 5000
 

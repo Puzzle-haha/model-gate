@@ -2,6 +2,10 @@
 
 **多模型 LLM 调用网关：可靠、可计量、可用数据选型。**
 
+[![Java](https://img.shields.io/badge/Java-21-blue)]() [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.16-green)]() [![MySQL](https://img.shields.io/badge/MySQL-8.0-orange)]() [![Redis](https://img.shields.io/badge/Redis-5.0-red)]()
+
+> 仓库地址：**https://github.com/Puzzle-haha/model-gate**
+
 让上层应用只调一个接口，底下自动完成供应商路由、密钥轮询、限流、熔断、降级、缓存、成本核算，并用实测数据回答「这个场景该用哪个模型最划算」。
 
 > 📌 项目范围、里程碑、验收标准见 **[docs/00-charter.md](docs/00-charter.md)**。动手前先看它。
@@ -432,6 +436,50 @@ java -jar target/model-gate-0.1.0-SNAPSHOT.jar `
 
 > 这个手段值得记住：**接入任何第三方服务前，先用假服务器把适配层验证透**。
 > 不要一上来就烧真实配额去 debug 自己的 HTTP 代码。
+
+---
+
+## 本机开发环境的两个特殊处理
+
+开发机上的 `github.com` 被 hosts 劫持到了 `127.0.0.1`（Steam++/Watt Toolkit 加速），
+这带来两个只有在这种环境下才会遇到的问题。记在这里，因为排查过程本身有点意思。
+
+### 1. git push 走不了 22 端口
+
+hosts 把 `github.com` 指向 `127.0.0.1`，而加速器**只监听 443，没有监听 22**，
+所以 `ssh git@github.com` 直接 `Connection refused`。
+
+解法：GitHub 官方提供了 443 端口的备用 SSH 入口 `ssh.github.com`。
+在 `~/.ssh/config` 里做一次重定向，对 git 完全透明：
+
+```
+Host github.com
+    HostName ssh.github.com
+    Port 443
+    User git
+```
+
+### 2. Git 自带的 ssh 不读这份 config
+
+改完 config 后 `git push` 仍然报 22 端口拒绝。原因是 **Git for Windows 自带一个
+MSYS2 版的 `ssh.exe`**，它解析 `~` 走的是自己的 HOME，找不到
+`C:\Users\<user>\.ssh\config`。
+
+用 `ssh -G github.com` 对比两个 ssh 就能一眼看出差别：
+
+| ssh | 解析结果 |
+|---|---|
+| Windows OpenSSH | `hostname ssh.github.com` `port 443` ✅ |
+| Git 自带的 MSYS2 ssh | `hostname github.com` `port 22` ❌ |
+
+解法：显式指定 git 使用哪个 ssh。
+
+```powershell
+git config --global core.sshCommand "C:/Windows/System32/OpenSSH/ssh.exe"
+```
+
+> 教训：**"配置文件改了但没生效"时，先确认到底是谁在读配置。**
+> 同名程序在 PATH 上有多个副本是极常见的情况，而它们的配置解析规则可能完全不同。
 
 ---
 

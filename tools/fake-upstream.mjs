@@ -30,6 +30,53 @@ function okBody(model, text) {
   };
 }
 
+/** 稳定的字符串哈希，用作"这道题算对还是算错"的确定性种子。 */
+function hash(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h);
+}
+
+/** 从评测 prompt 里解出正确答案。假上游真的会算，不是硬编码返回。 */
+function solveFixture(text) {
+  // 算术题
+  const m = text.match(/计算\s*(\d+)\s*([+\-*/])\s*(\d+)/);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[3]);
+    switch (m[2]) {
+      case '+': return String(a + b);
+      case '-': return String(a - b);
+      case '*': return String(a * b);
+      case '/': return String(Math.floor(a / b));
+    }
+  }
+  // 情感分类：简单关键词规则（这正是"弱模型"的实现方式）
+  const positive = ['棒', '很好', '周到', '快', '很高', '没问题', '满意'];
+  const negative = ['差', '难吃', '失望', '麻烦', '坏', '两小时'];
+  let p = 0;
+  let n = 0;
+  for (const w of positive) if (text.includes(w)) p++;
+  for (const w of negative) if (text.includes(w)) n++;
+  if (p === 0 && n === 0) return '未知';
+  return p >= n ? '正面' : '负面';
+}
+
+/** 答错时给一个"像样"的错误答案，而不是一眼假的占位符。 */
+function wrongAnswer(text) {
+  const correct = solveFixture(text);
+  if (/^\d+$/.test(correct)) {
+    // 算错一位 —— 真实模型最常见的错误形态
+    return String(Number(correct) + 1);
+  }
+  if (correct === '正面') return '负面';
+  if (correct === '负面') return '正面';
+  return '正面';
+}
+
 const server = http.createServer((req, res) => {
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
@@ -75,6 +122,40 @@ const server = http.createServer((req, res) => {
     }
     if (key === 'fake-key-429') {
       return send(429, { error: { message: 'rate limit exceeded (fake-key-429)' } });
+    }
+
+    // ------------------------------------------------------------------
+    // 评测用模型：模拟"能力不同、价格不同"的三个模型。
+    //
+    // 假上游真的会去算题，只是按模型名控制正确率：
+    //   eval-strong  永远算对（贵）
+    //   eval-weak    约 60% 算对（中）
+    //   eval-cheap   约 35% 算对（便宜）
+    //
+    // 正确率用 prompt 的哈希做种子，所以**同一道题的结果是稳定的** ——
+    // 评测必须可重复，不能每次跑分数都不一样。
+    // ------------------------------------------------------------------
+    if (model.startsWith('eval-')) {
+      let userText = '';
+      try {
+        const parsed = JSON.parse(raw);
+        userText = (parsed.messages || [])
+          .filter((m) => m.role === 'user')
+          .map((m) => m.content)
+          .join('\n');
+      } catch { /* ignore */ }
+
+      const answer = solveFixture(userText);
+      const accuracy = model === 'eval-strong' ? 1.0
+        : model === 'eval-weak' ? 0.6
+        : 0.35;
+      // 用 prompt 哈希决定这道题算对还是算错 —— 确定性，可重复
+      const roll = (hash(userText) % 1000) / 1000;
+      const correct = roll < accuracy;
+      const output = correct ? answer : wrongAnswer(userText);
+
+      await new Promise((r) => setTimeout(r, model === 'eval-cheap' ? 20 : 60));
+      return send(200, okBody(model, output));
     }
 
     switch (model) {

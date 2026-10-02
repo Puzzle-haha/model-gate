@@ -1,0 +1,78 @@
+{
+  "name": "基础能力评测集",
+  "description": "用于对比不同模型在任务上的准确率与成本。任务刻意设计成『有唯一正确答案』，这样打分不需要人工判断，评测可以完全自动化、可重复。",
+  "tasks": [
+    {
+      "id": "arith-001",
+      "type": "arithmetic",
+      "prompt": "计算 12 + 7，只输出数字结果。",
+      "expected": "19"
+    },
+    {
+      "id": "arith-002",
+      "type": "arithmetic",
+      "prompt": "计算 34 + 58，只输出数字结果。",
+      "expected": "92"
+    },
+    {
+      "id": "arith-003",
+      "type": "arithmetic",
+      "prompt": "计算 145 + 267，只输出数字结果。",
+      "expected": "412"
+    },
+    {
+      "id": "arith-004",
+      "type": "arithmetic",
+      "prompt": "计算 1000 - 368，只输出数字结果。",
+      "expected": "632"
+    },
+    {
+      "id": "arith-005",
+      "type": "arithmetic",
+      "prompt": "计算 23 * 7，只输出数字结果。",
+      "expected": "161"
+    },
+    {
+      "id": "arith-006",
+      "type": "arithmetic",
+      "prompt": "计算 256 / 8，只输出数字结果。",
+      "expected": "32"
+    },
+    {
+      "id": "sent-001",
+      "type": "sentiment",
+      "prompt": "判断情感倾向，只回答「正面」或「负面」：这家餐厅太棒了，服务也很周到。",
+      "expected": "正面"
+    },
+    {
+      "id": "sent-002",
+      "type": "sentiment",
+      "prompt": "判断情感倾向，只回答「正面」或「负面」：等了两小时，菜还很难吃，非常失望。",
+      "expected": "负面"
+    },
+    {
+      "id": "sent-003",
+      "type": "sentiment",
+      "prompt": "判断情感倾向，只回答「正面」或「负面」：产品质量很好，物流也快，会回购。",
+      "expected": "正面"
+    },
+    {
+      "id": "sent-004",
+      "type": "sentiment",
+      "prompt": "判断情感倾向，只回答「正面」或「负面」：客服态度极差，推来推去不给解决。",
+      "expected": "负面"
+    },
+    {
+      "id": "sent-005",
+      "type": "sentiment",
+      "prompt": "判断情感倾向，只回答「正面」或「负面」：性价比很高，用了一个月没有任何问题。",
+      "expected": "正面"
+    },
+    {
+      "id": "sent-006",
+      "type": "sentiment",
+      "prompt": "判断情感倾向，只回答「正面」或「负面」：收到就是坏的，退货还特别麻烦。",
+      "expected": "负面"
+    }
+  ]
+}
