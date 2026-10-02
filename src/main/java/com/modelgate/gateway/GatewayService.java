@@ -5,6 +5,7 @@ import com.modelgate.calllog.CallLogWriter;
 import com.modelgate.cache.CacheProperties;
 import com.modelgate.cache.CachedResponse;
 import com.modelgate.cache.ResponseCache;
+import com.modelgate.observability.GatewayMetrics;
 import com.modelgate.pricing.CostCalculator;
 import com.modelgate.provider.ChatMessage;
 import com.modelgate.provider.Provider;
@@ -62,11 +63,13 @@ public class GatewayService {
     private final ResponseCache cache;
     private final CacheProperties cacheProps;
     private final CostCalculator costCalculator;
+    private final GatewayMetrics metrics;
 
     public GatewayService(ProviderRegistry registry, ProviderInvoker invoker,
                           GatewayProperties props, CallLogWriter callLogWriter,
                           RateLimitGuard guard, ResponseCache cache,
-                          CacheProperties cacheProps, CostCalculator costCalculator) {
+                          CacheProperties cacheProps, CostCalculator costCalculator,
+                          GatewayMetrics metrics) {
         this.registry = registry;
         this.invoker = invoker;
         this.props = props;
@@ -75,6 +78,7 @@ public class GatewayService {
         this.cache = cache;
         this.cacheProps = cacheProps;
         this.costCalculator = costCalculator;
+        this.metrics = metrics;
         log.info("网关初始化: 默认模型={} 故障转移深度={}（最多上游调用次数 = 深度 × 重试次数）",
                 props.getDefaultModel(), props.getFailoverDepth());
     }
@@ -114,6 +118,7 @@ public class GatewayService {
         if (cacheable) {
             CachedResponse hit = cache.get(cacheKey);
             if (hit != null) {
+                metrics.recordCache("hit");
                 return fromCache(requestId, tenant, requestedModel, model, hit,
                         startedAt, failoverTrace);
             }
@@ -131,6 +136,11 @@ public class GatewayService {
             if (!loader) {
                 CachedResponse waited = cache.awaitLoad(cacheKey, cacheProps.getLoadWaitMs());
                 if (waited != null) {
+                    // 被单飞合并 —— 单独统计，因为它和"命中已有缓存"是两回事：
+                    // 前者说明有并发争抢，后者说明缓存工作正常。
+                    // 混在一起就分不清"缓存命中率高"是因为缓存有效，
+                    // 还是因为大量并发被合并了。
+                    metrics.recordCache("coalesced");
                     return fromCache(requestId, tenant, requestedModel, model, waited,
                             startedAt, failoverTrace);
                 }
@@ -139,6 +149,9 @@ public class GatewayService {
                 // 这个取舍是划算的。
                 failoverTrace.add("等待其他请求加载缓存超时，自行加载");
             }
+        }
+        if (cacheable) {
+            metrics.recordCache("miss");
         }
 
         // ==================================================================
@@ -208,10 +221,14 @@ public class GatewayService {
             InvocationResult result = invoker.invoke(provider, providerRequest, ResilienceOptions.DEFAULT);
             lastResult = result;
 
+            // 先算成本，指标和落库共用同一个值 —— 两处各算一遍迟早会算出不一样的数
+            long costMicros = computeCost(model, result);
+            recordMetrics(provider.name(), model, result, costMicros);
+
             // 每一次供应商尝试都落一条日志（同一个 requestId）。
             // 这样"发生了多少次故障转移"就能直接从数据里查出来：
             //   SELECT request_id FROM call_log GROUP BY request_id HAVING COUNT(DISTINCT provider) > 1
-            persistCallLog(requestId, tenant, requestedModel, provider.name(), model, result);
+            persistCallLog(requestId, tenant, requestedModel, provider.name(), model, result, costMicros);
 
             if (result.success()) {
                 if (i > 0) {
@@ -248,24 +265,45 @@ public class GatewayService {
     }
 
     /**
+     * 计算这次调用的成本。
+     *
+     * 只有真的调用了上游并成功才计费 —— 降级返回的兜底文案不产生费用，
+     * 失败的上游调用也不该计（我们没拿到产出）。
+     */
+    private long computeCost(String model, InvocationResult result) {
+        if (!result.success() || result.response() == null) {
+            return 0L;
+        }
+        return costCalculator.costMicros(model,
+                result.response().promptTokens(), result.response().completionTokens());
+    }
+
+    /** 记录 Micrometer 指标。标签只用取值有限的维度，避免基数爆炸。 */
+    private void recordMetrics(String providerName, String model,
+                               InvocationResult result, long costMicros) {
+        metrics.recordCall(providerName, model,
+                result.success() ? "success" : "degraded",
+                result.elapsedMs(), costMicros);
+        if ("circuit_open".equals(result.errorType())) {
+            metrics.recordCircuitOpen(providerName, model);
+        }
+    }
+
+    /**
      * 异步落库。CallLogWriter.submit 承诺永不抛异常、永不阻塞 ——
      * 所以这里不需要 try-catch。"记录日志失败导致业务失败"是绝对不能接受的。
      */
     private void persistCallLog(String requestId, String tenant, String requestedModel,
-                                String providerName, String model, InvocationResult result) {
+                                String providerName, String model, InvocationResult result,
+                                long costMicros) {
         Integer promptTokens = null;
         Integer completionTokens = null;
         Integer totalTokens = null;
-        long costMicros = 0L;
 
         if (result.response() != null) {
             promptTokens = result.response().promptTokens();
             completionTokens = result.response().completionTokens();
             totalTokens = result.response().totalTokens();
-            // 只有真的调用了上游才计成本。降级返回的兜底文案不产生费用。
-            if (result.success()) {
-                costMicros = costCalculator.costMicros(model, promptTokens, completionTokens);
-            }
         }
 
         callLogWriter.submit(CallLog.record(

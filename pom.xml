@@ -45,6 +45,17 @@
     </dependency>
 
     <!--
+      Prometheus 暴露格式：/actuator/prometheus
+      Actuator 自带的 /actuator/metrics 是给人看的 JSON；
+      真正接入监控系统要的是 Prometheus 这种可被周期性抓取的文本格式。
+      两者都要：前者用于排查，后者用于告警。
+    -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-prometheus</artifactId>
+    </dependency>
+
+    <!--
       Redis：令牌桶限流 + 配额计数。
       选 Redis 而不是本地 Guava RateLimiter 的原因：
         - 网关可能多实例部署，本地计数会各算各的，实际放行量变成 N 倍

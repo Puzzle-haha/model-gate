@@ -1,5 +1,6 @@
 package com.modelgate.ratelimit;
 
+import com.modelgate.observability.GatewayMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -26,10 +27,13 @@ public class RateLimitGuard {
 
     private final TokenBucketRateLimiter limiter;
     private final QuotaService quota;
+    private final GatewayMetrics metrics;
 
-    public RateLimitGuard(TokenBucketRateLimiter limiter, QuotaService quota) {
+    public RateLimitGuard(TokenBucketRateLimiter limiter, QuotaService quota,
+                          GatewayMetrics metrics) {
         this.limiter = limiter;
         this.quota = quota;
+        this.metrics = metrics;
     }
 
     /**
@@ -46,6 +50,9 @@ public class RateLimitGuard {
         if (decision.degraded()) {
             log.warn("限流组件不可用，本次按 fail-open 放行（tenant={}）", tenant);
         } else if (!decision.allowed()) {
+            // 被拒绝的请求也计入指标 —— 否则"限流到底拦了多少"没有数据支撑，
+            // 面试时只能说"我实现了限流"，说不出"它拦住了多少无效调用"
+            metrics.recordRejected("requests");
             throw new RateLimitedException("rate_limit_exceeded", "requests",
                     decision.retryAfterMs(), decision.remaining());
         }
@@ -53,6 +60,7 @@ public class RateLimitGuard {
         // ---- 2. 用量配额（长周期，防止某个租户失控烧钱）----
         String exceeded = quota.checkExceeded(tenant);
         if (exceeded != null) {
+            metrics.recordRejected(exceeded);
             throw new RateLimitedException("quota_exceeded", exceeded, -1, 0);
         }
 

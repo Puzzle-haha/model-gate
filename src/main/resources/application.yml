@@ -61,10 +61,19 @@ management:
   endpoints:
     web:
       exposure:
+        # prometheus 是给监控系统抓取的文本格式，metrics 是给人看的 JSON。
+        # 两者都要：前者用于告警，后者用于排查。
         include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: always
+  metrics:
+    distribution:
+      # 让 Timer 输出百分位直方图，Prometheus 才能算聚合百分位
+      percentiles-histogram:
+        modelgate.call.duration: true
+      percentiles:
+        modelgate.call.duration: 0.5, 0.95, 0.99
 
 # ---------------------------------------------------------------------------
 # 网关自身配置

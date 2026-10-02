@@ -32,6 +32,17 @@ import java.time.OffsetDateTime;
  * 3. created_at 在【构造时】就固定，不是 @PrePersist 时生成。
  *    因为日志是异步批量落库的，@PrePersist 的时间会比真实调用晚几百毫秒
  *    甚至几秒，用来算延迟和做时间聚合就失真了。
+ *
+ * 4. ⚠️ **created_at 列里存的是 UTC，不是本地时间。**
+ *    Hibernate 把 OffsetDateTime 当作 TIMESTAMP_UTC 处理，写入 DATETIME 列前
+ *    会先转成 UTC。所以：
+ *      - Java 侧写 OffsetDateTime.now()，读出来自动还原成带 +08:00 的时间，一切正常
+ *      - 但**任何原生 SQL 都必须用 UTC_TIMESTAMP() 而不是 NOW()**，
+ *        否则会差出一个时区偏移（本机是 8 小时），报表查出来是空的
+ *      - 直接连数据库看到的数字比北京时间小 8 小时，这是预期行为，不是 bug
+ *
+ *    这是"统一用 UTC 存储"的常见代价：语义正确，但对写裸 SQL 的人不友好。
+ *    所以必须在这里显式写清楚 —— 不写，下一个人一定会踩。
  */
 @Entity
 @Table(name = "call_log", indexes = {

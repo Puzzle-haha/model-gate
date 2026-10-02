@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ModelGate 控制台</title>
+  <link rel="stylesheet" href="/dashboard.css">
+  <!--
+    ECharts 放在本地而不是用 CDN。
+    理由：面试演示时可能在没有可靠外网的环境，Dashboard 打不开是硬伤。
+    0.98MB 换"任何环境都能演示"，很划算。
+  -->
+  <script src="/vendor/echarts.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>ModelGate</h1>
+      <span class="sub">多模型 LLM 调用网关 · 控制台</span>
+    </div>
+    <div class="controls">
+      <div class="windows" id="windows"></div>
+      <label class="auto"><input type="checkbox" id="auto-refresh" checked> 自动刷新 5s</label>
+      <span class="updated" id="updated">—</span>
+    </div>
+  </header>
+
+  <div id="banner" class="banner hidden"></div>
+
+  <!-- KPI 卡片 -->
+  <section class="kpis" id="kpis"></section>
+
+  <!-- 图表 -->
+  <section class="grid">
+    <div class="card">
+      <h2>调用量与降级趋势</h2>
+      <p class="hint">每分钟聚合。降级说明上游出了问题、由网关兜住了。</p>
+      <div class="chart" id="chart-volume"></div>
+    </div>
+    <div class="card">
+      <h2>延迟趋势</h2>
+      <p class="hint">平均值。注意平均值会骗人 —— 关键看 P95/P99 卡片。</p>
+      <div class="chart" id="chart-latency"></div>
+    </div>
+    <div class="card">
+      <h2>按模型成本</h2>
+      <p class="hint">单位：元。缓存命中的调用成本为 0。</p>
+      <div class="chart" id="chart-cost"></div>
+    </div>
+    <div class="card">
+      <h2>供应商表现</h2>
+      <p class="hint">调用量、平均耗时、降级次数。降级多说明这家不稳定。</p>
+      <div class="table-wrap"><table id="table-providers"></table></div>
+    </div>
+  </section>
+
+  <!-- 运行时状态 -->
+  <section class="grid">
+    <div class="card">
+      <h2>熔断器状态</h2>
+      <p class="hint">粒度是 <code>(供应商, 模型)</code> —— 单个模型被限流不该拖垮整个供应商。</p>
+      <div class="table-wrap"><table id="table-breakers"></table></div>
+    </div>
+    <div class="card">
+      <h2>线程池隔离</h2>
+      <p class="hint">粒度是 <code>供应商</code> —— 限制「对某个上游的总并发」，别把它打死。</p>
+      <div class="table-wrap"><table id="table-pools"></table></div>
+    </div>
+    <div class="card">
+      <h2>缓存与限流</h2>
+      <p class="hint">运行时状态（内存），进程重启会归零；上方图表的数据来自数据库，可回溯。</p>
+      <div class="table-wrap"><table id="table-runtime"></table></div>
+    </div>
+    <div class="card">
+      <h2>网关决策说明</h2>
+      <p class="hint">
+        一个请求的完整旅程：<b>准入检查</b>（限流/配额）→ <b>缓存查找</b> →
+        <b>单飞抢加载权</b> → <b>候选供应商逐个尝试</b>（含故障转移）→
+        <b>回填缓存</b> → <b>落库</b>。<br><br>
+        每一层都在为后面的层挡掉不该发生的开销：
+        限流挡过量请求，缓存挡重复请求，路由只处理真正需要上游的请求。
+      </p>
+      <p class="hint">
+        指标接口：<code>/actuator/prometheus</code>（可被 Prometheus 抓取）<br>
+        数据接口：<code>/api/dashboard/summary</code>
+      </p>
+    </div>
+  </section>
+
+  <script src="/dashboard.js"></script>
+</body>
+</html>
