@@ -1,0 +1,97 @@
+# ============================================================================
+# 本地联调配置 —— 把上游指向 tools/fake-upstream.mjs
+# ============================================================================
+# 这个文件【不在 classpath 上】，只有显式指定时才会被加载：
+#
+#   node tools/fake-upstream.mjs                       # 另开一个终端
+#   java -jar target/model-gate-*.jar \
+#     --spring.config.additional-location=file:./tools/localtest.yml
+#
+# 因为没有真实 API key，用它来验证「HTTP 请求构造 / 响应解析 / 错误码映射 /
+# 故障转移 / 密钥池」这一整层。真实上游不可能"这次给我返回 429"，
+# 也不可能"故意挂掉让我验证切换"，而这里都可以。
+# ============================================================================
+
+modelgate:
+  gateway:
+    # 让 model="auto" 走假上游，方便演示
+    default-model: fake-ok
+    # 允许切到下一个候选供应商
+    failover-depth: 3
+
+  # 假上游的单价。用真实量级的数字，这样成本报表跑出来是有意义的数，
+  # 而不是一片 0 —— 报表是 0 的时候你没法判断"是没配单价"还是"真的没花钱"。
+  pricing:
+    models:
+      fake-fast:
+        input-per-million: 2.0
+        output-per-million: 8.0
+      fake-ok:
+        input-per-million: 2.0
+        output-per-million: 8.0
+
+  providers:
+    # 列表属性是【整体替换】的：这里配了 providers，
+    # application.yml 里那个 deepseek 条目就不会生效。
+
+    # ------------------------------------------------------------------
+    # 1) 故意配一个"坏"供应商：9998 端口上什么都没有，连接会被立刻拒绝。
+    #
+    # 优先级 10（比下面那个 20 小）= 会被【优先尝试】，
+    # 于是每次请求都会先失败、再故障转移到健康的那个 ——
+    # 这就是故障转移的现场演示。
+    # ------------------------------------------------------------------
+    - name: localtest-broken
+      base-url: http://127.0.0.1:9998
+      api-key: fake-key-broken
+      priority: 10
+      models:
+        - fake-ok
+        - fake-500
+      # 连接被拒绝是立刻返回的，超时给短一点，测试跑得快
+      timeout-ms: 2000
+
+    # ------------------------------------------------------------------
+    # 2) 真·假上游：tools/fake-upstream.mjs
+    # ------------------------------------------------------------------
+    - name: localtest
+      base-url: http://127.0.0.1:9999
+      api-key: fake-key-for-local-test
+      priority: 20
+      models:
+        - fake-ok
+        - fake-500
+        - fake-401
+        - fake-429
+        - fake-badjson
+        - fake-slow
+        - fake-verySlow
+        # 只有 localtest 支持 fake-fast，所以不会触发故障转移 ——
+        # 限流和压测场景需要这种"干净"的路径，否则每次都先失败一次，
+        # 延迟和调用次数都被污染了
+        - fake-fast
+      # 5 秒：fake-slow(2s) 能过，fake-verySlow(12s) 会超时
+      timeout-ms: 5000
+
+    # ------------------------------------------------------------------
+    # 3) 密钥池演示：两把密钥，第一把是坏的（假上游对它返回 401）。
+    #
+    # 期望行为：
+    #   第 1 次尝试用 fake-key-bad  → 401 → 把这把冷却掉
+    #   因为池里还有健康密钥，401 被标记为【可重试】
+    #   第 2 次尝试自动换用 good key → 200 成功
+    #
+    # 对比：如果只有一把坏密钥，401 就【不可重试】——
+    # 重试一万次还是那把密钥，纯属浪费。
+    # ------------------------------------------------------------------
+    - name: localtest-keypool
+      base-url: http://127.0.0.1:9999
+      priority: 30
+      api-keys:
+        - fake-key-bad
+        - fake-key-for-local-test
+      # 缩短冷却时间，方便观察
+      auth-cooldown-ms: 60000
+      models:
+        - fake-keypool
+      timeout-ms: 5000

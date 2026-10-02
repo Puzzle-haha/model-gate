@@ -1,0 +1,20 @@
+# --- 构建产物 ---
+target/
+
+# --- 凭据：绝对不许提交 ---
+.env
+
+# --- IDE ---
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# --- 系统 ---
+.DS_Store
+Thumbs.db
+
+# --- 日志与运行时数据 ---
+*.log
+logs/

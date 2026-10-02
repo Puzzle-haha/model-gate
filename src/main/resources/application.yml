@@ -1,0 +1,214 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: model-gate
+
+  datasource:
+    # 刻意不给默认值：配置缺失时启动直接失败，而不是悄悄连到别的库上。
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 3000
+
+  jpa:
+    hibernate:
+      # 表结构由 Flyway 管理（src/main/resources/db/migration）。
+      # validate 表示"Hibernate 启动时校验实体和表是否一致，不一致就启动失败" ——
+      # 这样结构漂移会在启动瞬间暴露，而不是等到线上某个查询报错才发现。
+      ddl-auto: validate
+    # 关掉 Open Session In View：避免视图阶段还占着数据库连接，也避免掩盖 N+1。
+    open-in-view: false
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # 表结构变更一律走迁移脚本，禁止手工改库
+    validate-on-migrate: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      # ----------------------------------------------------------------------
+      # ⚠️ 这两个超时必须显式设置。
+      #
+      # Lettuce（Spring Boot 默认的 Redis 客户端）命令超时默认是 60 秒。
+      # 也就是说 Redis 卡住时，你的每一次限流检查都会挂 60 秒 ——
+      # 网关会在"限流组件故障"之上再叠一层"自身全面不可用"，
+      # 故障被放大而不是被隔离。
+      #
+      # 限流是保护措施，它的超时必须远小于业务超时：
+      # 宁可快速失败走 fail-open，也不能让保护措施变成故障源。
+      # ----------------------------------------------------------------------
+      timeout: 800ms
+      connect-timeout: 800ms
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+# ---------------------------------------------------------------------------
+# 网关自身配置
+# ---------------------------------------------------------------------------
+modelgate:
+  # -------------------------------------------------------------------------
+  # 限流与配额
+  # -------------------------------------------------------------------------
+  ratelimit:
+    enabled: true
+
+    # 令牌桶容量 = 允许的【突发】请求数
+    capacity: 20
+
+    # 每秒补充令牌数 = 长期平均速率
+    # capacity=20 + refill=5/s 的含义：长期平均 5 QPS，但允许瞬间打 20 个
+    refill-per-second: 5
+
+    # Redis 不可用时是否放行。
+    # true  = 保护可用性（限流挂了服务照常，但期间限流失效）
+    # false = 保护上游（限流挂了拒绝一切，但 Redis 抖动会变成全站不可用）
+    # 默认选可用性：限流是保护措施，不该成为单点故障源。
+    fail-open: true
+
+    key-prefix: "mg:rl:"
+
+    # 按 token 的用量配额，防止某个租户失控烧钱。<= 0 表示不限。
+    quota-enabled: true
+    daily-tokens: 200000
+    monthly-tokens: 3000000
+
+  # -------------------------------------------------------------------------
+  # 响应缓存
+  # -------------------------------------------------------------------------
+  cache:
+    enabled: true
+    ttl-seconds: 300
+
+    # 缓存键是否含调用方。
+    # true  = 更安全（一个租户的响应不会被另一个租户命中），代价是命中率降低
+    # false = 命中率更高，但 prompt 完全一致时存在跨租户读到同一份缓存的理论风险
+    # 默认选安全的：**缓存带来的性能收益不值得用数据隔离风险去换。**
+    include-tenant: true
+
+    # 只缓存 temperature == 0 的请求。
+    # ⚠️ 关掉它意味着你在缓存一个非确定性接口 —— 用户要 10 个不同标题，
+    #    你却每次都返回同一个。功能"能用"，但语义是错的，而且很难发现。
+    only-deterministic: true
+
+    # 单飞等待其他请求加载的最长时间，超时后自己也去加载（避免死等）
+    load-wait-ms: 3000
+    key-prefix: "mg:cache:"
+
+  # -------------------------------------------------------------------------
+  # 模型单价（元 / 每百万 token），照抄各家官方定价即可
+  # -------------------------------------------------------------------------
+  pricing:
+    currency: CNY
+
+    # 没配单价的模型走这里。默认 0 = 不计费。
+    # 刻意不设拍脑袋的默认价：**"算错的钱"比"没算的钱"更危险** ——
+    # 前者让报表看起来有数据，实际全是错的。
+    default-price:
+      input-per-million: 0
+      output-per-million: 0
+
+    models:
+      deepseek-chat:
+        input-per-million: 2.0
+        output-per-million: 8.0
+      deepseek-reasoner:
+        input-per-million: 4.0
+        output-per-million: 16.0
+
+  gateway:
+    # 客户端请求 model="auto" 时实际用哪个模型。
+    # M1 是固定值；M2 会换成按成本/健康度/任务类型的真正路由策略。
+    default-model: mock-ok
+
+    # M1 还没有密钥管理，先不强制校验。M3 接入密钥池后打开。
+    require-api-key: false
+
+    # 故障转移深度：一次请求最多尝试几个供应商。
+    # 最多上游调用次数 = failover-depth × resilience.max-attempts
+    # 默认 2 × 3 = 6 次。两个都调大会造成"重试放大"，故障期间足以打垮上游。
+    failover-depth: 2
+
+  # -------------------------------------------------------------------------
+  # 调用日志异步落库
+  # -------------------------------------------------------------------------
+  calllog:
+    enabled: true
+    # 待写入队列容量。必须有界：无界队列在数据库变慢时会吃光内存。
+    queue-capacity: 10000
+    # 单批写入条数，批量插入比逐条快一个数量级
+    batch-size: 200
+    poll-timeout-ms: 1000
+
+  # -------------------------------------------------------------------------
+  # 真实供应商。
+  #
+  # 一个 OpenAiCompatibleProvider 覆盖一大片上游：DeepSeek、通义（兼容模式）、
+  # 智谱、Moonshot、各类 OneAPI/NewAPI 中转站、本地 vLLM/Ollama ——
+  # 它们讲的是同一套 OpenAI 协议，差别只在 base-url、密钥和模型名。
+  #
+  # api-key 为空时该供应商会被【跳过】并在启动日志里说明原因，
+  # 而不是让应用启动失败 —— 没填密钥不该阻塞开发。
+  # -------------------------------------------------------------------------
+  providers:
+    - name: deepseek
+      # base-url 要含版本路径前缀（OpenAI 是 https://api.openai.com/v1）
+      base-url: https://api.deepseek.com
+      api-key: ${DEEPSEEK_API_KEY:}
+      models:
+        - deepseek-chat
+        - deepseek-reasoner
+      # 真实 LLM 生成要几十秒。超时设错比不设更糟：
+      # 设太小会把正常流量全判成超时，然后疯狂重试把上游打挂。
+      timeout-ms: 60000
+
+  # -------------------------------------------------------------------------
+  # 容错参数（Phase 0 已实测验证，直接沿用）
+  # -------------------------------------------------------------------------
+  resilience:
+    # 单次调用超时。整个容错体系里最重要的一项。
+    timeout-ms: 1500
+    max-attempts: 3
+    backoff-base-ms: 200
+
+    # 每个供应商独立的线程池（bulkhead）。
+    # 按供应商隔离，一家卡死不会饿死其他家。
+    pool-size: 4
+    queue-capacity: 8
+
+    # 超时后是否中断工作线程。必须为 true ——
+    # 改成 false 会让池子被永久占死，服务"静默死亡"（Phase 0 实验 6 已验证）。
+    cancel-on-timeout: true
+
+    breaker-failure-threshold: 5
+    breaker-open-ms: 10000
+
+    # MockProvider 的"慢响应"耗时，要明显超过超时阈值才有意义
+    mock-slow-ms: 5000
+
+logging:
+  level:
+    com.modelgate: DEBUG
