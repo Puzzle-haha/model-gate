@@ -1,0 +1,71 @@
+# ============================================================================
+# 本地一键起全套（应用 + MySQL + Redis）
+# ============================================================================
+# ⚠️ 本机没有安装 Docker，这份文件【未经实际运行验证】。
+#
+# 用途：换一台机器时能快速跑起来，或者演示给面试官看。
+#   docker compose up -d
+#   curl.exe http://127.0.0.1:8081/actuator/health
+#
+# 注意：这里起的 MySQL 是全新的空库，Flyway 会自动建表。
+# ============================================================================
+
+services:
+
+  mysql:
+    image: mysql:8.0
+    container_name: modelgate-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root-dev-only
+      MYSQL_DATABASE: model_gate
+      MYSQL_USER: modelgate_app
+      MYSQL_PASSWORD: modelgate-dev-only
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot-dev-only"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: modelgate-redis
+    # 只监听本地，避免误暴露到公网（Redis 未设密码时是重大安全隐患）
+    command: ["redis-server", "--bind", "0.0.0.0", "--protected-mode", "yes"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build: .
+    container_name: modelgate-app
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_URL: "jdbc:mysql://mysql:3306/model_gate?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&characterEncoding=utf8"
+      DB_USER: modelgate_app
+      DB_PASSWORD: modelgate-dev-only
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SERVER_PORT: "8081"
+      # 真实供应商密钥。留空则该供应商被跳过，只有 MockProvider 可用。
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+    ports:
+      - "8081:8081"
+
+volumes:
+  mysql-data:

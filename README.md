@@ -18,14 +18,16 @@
 | [docs/05-llm-resilience.md](docs/05-llm-resilience.md) | 容错实验：9 种故障模式、实验协议、实测数据 |
 | [docs/07-loadtest.md](docs/07-loadtest.md) | 压测报告：测量边界、预热方法论、三组对比数据 |
 | [docs/08-resume.md](docs/08-resume.md) | 简历文案、逐条拆解、预设追问与不该写什么 |
+| [docs/09-interview.md](docs/09-interview.md) | 面试追问手册：20 个高频问题 + 答不上来怎么办 |
+| [docs/10-deploy.md](docs/10-deploy.md) | 部署指南：裸机 systemd / Docker、**安全清单** |
 | [docs/screenshot-dashboard.png](docs/screenshot-dashboard.png) | 控制台截图 |
 
 ---
 
 ## 当前状态
 
-**已完成**：M1–M6 全部里程碑 · 项目已开源上线
-**进行中**：M7 —— 压测报告 ✅ / 简历文案 ✅ / 面试追问准备 ⬜ / 部署文档 ⬜
+**已完成**：M1–M7 全部里程碑（含简历文案与面试手册）
+**待办**：部署上线（可选，需自备服务器；文档已就绪，见 docs/10-deploy.md）
 
 章节按时间倒序排列，最新的在前。
 
