@@ -81,9 +81,26 @@ public class OpenAiCompatibleProvider implements Provider {
         // 于是"重试"就自动变成了"换一把凭证再试"。
         String key = keyPool.acquire();
         if (key == null) {
+            // ================================================================
+            // 标记为【不可重试】—— 这里曾经是 true，是个实测出来的浪费。
+            //
+            // 冷却时长是分钟级（鉴权失败 600s、限流 30s），而重试退避只有
+            // 几百毫秒（215ms + 538ms）。**在退避窗口内密钥不可能恢复**，
+            // 所以 3 次尝试注定拿到同样的结果。
+            //
+            // 实测对照（详见 tools/localtest.yml 的 localtest-allbad）：
+            //   retryable=true  → attempts=3，耗时 758ms，退避两次
+            //   retryable=false → attempts=1，耗时 ~50ms
+            // 每个请求白白多等 700ms，熔断器还多记了 3 倍失败。
+            //
+            // 注意：标记为不可重试【不影响故障转移】——
+            // GatewayService 拿到失败结果后照样会切到下一个候选供应商。
+            // 这个标记只控制"对同一家要不要再来几次"。
+            // ================================================================
             throw new LlmCallException(
-                    "供应商 " + config.getName() + " 的所有密钥都在冷却中（全部失效或被限流）",
-                    true, "all_keys_cooling");
+                    "供应商 " + config.getName() + " 的所有密钥都在冷却中（全部失效或被限流），"
+                            + "重试无法改变（冷却时长以分钟计，退避只有几百毫秒）",
+                    false, "all_keys_cooling");
         }
 
         Map<String, Object> body = buildRequestBody(request);

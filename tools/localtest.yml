@@ -111,3 +111,24 @@ modelgate:
       models:
         - fake-keypool
       timeout-ms: 5000
+
+    # ------------------------------------------------------------------
+    # 4) 只有一把【坏】密钥的供应商 —— 用于验证「全部密钥冷却」这条路径。
+    #
+    # 期望行为：
+    #   第 1 次调用：取到唯一的坏密钥 → 401 → 把它冷却掉
+    #   第 2 次调用：池里已经没有可用密钥 → all_keys_cooling
+    #
+    # 优先级 5（最高）且支持 fake-fast，所以 /api/lab/ask?model=fake-fast
+    # 会落在它身上，便于单独观察。
+    # （lab 的单次调用不做故障转移，不会偷偷切到别的供应商。）
+    # ------------------------------------------------------------------
+    - name: localtest-allbad
+      base-url: http://127.0.0.1:9999
+      priority: 5
+      api-keys:
+        - fake-key-bad
+      auth-cooldown-ms: 600000
+      models:
+        - fake-fast
+      timeout-ms: 5000
