@@ -2,7 +2,7 @@
 
 **多模型 LLM 调用网关：可靠、可计量、可用数据选型。**
 
-[![Java](https://img.shields.io/badge/Java-21-blue)]() [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.16-green)]() [![MySQL](https://img.shields.io/badge/MySQL-8.0-orange)]() [![Redis](https://img.shields.io/badge/Redis-5.0-red)]()
+[![Java](https://img.shields.io/badge/Java-21-blue)]() [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.16-green)]() [![MySQL](https://img.shields.io/badge/MySQL-8.0-orange)]() [![Redis](https://img.shields.io/badge/Redis-5.0-red)]() [![CI](https://github.com/Puzzle-haha/model-gate/actions/workflows/ci.yml/badge.svg)](https://github.com/Puzzle-haha/model-gate/actions/workflows/ci.yml)
 
 > 仓库地址：**https://github.com/Puzzle-haha/model-gate**
 
@@ -33,7 +33,66 @@
 
 ---
 
-## M6 · 评测集与模型质量回归 —— 已完成 ✅
+## 测试 —— 72 个测试，全部通过 ✅
+
+```bash
+./mvnw test
+# Tests run: 72, Failures: 0, Errors: 0, Skipped: 0
+# BUILD SUCCESS
+```
+
+### 测什么、不测什么
+
+**全部是纯逻辑单元测试，不需要 MySQL、不需要 Redis、不需要 Spring 容器。**
+整个测试套件 1.3 秒跑完。
+
+这不是偷懒，是刻意的取舍：**如果每个测试都要起数据库，就没有人愿意在本地频繁跑了。**
+把需要外部依赖的部分隔离开，核心逻辑的验证成本才能降到最低。
+（需要真实基础设施的部分——限流的 Lua 原子性、故障转移——用 M3/M4 的
+并发验证脚本实测，那些结论写在对应章节里。）
+
+### 选择标准：只测「错了不会报错」的逻辑
+
+功能测试的价值在于防止回归，但**最高价值的测试是守护那些"静默出错"的地方** ——
+写错了不抛异常、不打日志，只在特定条件下悄悄返回错误结果。
+
+| 测试类 | 测什么 | 为什么必须测 |
+|---|---|---|
+| `ResponseCacheKeyTest`（20） | 缓存键一一映射、单飞 | **★ 守护一个真实发生过的 bug**，见下 |
+| `ApiKeyPoolTest`（14） | 轮询、冷却、脱敏 | 脱敏回归 = **密钥泄露**；冷却错了会表现为配额莫名下降 |
+| `ScorerTest`（13） | 归一化边界 | 归一化做少=测格式，做多=把错误判成对。**两个方向都不报错** |
+| `ProviderRegistryTest`（10） | 优先级排序、模型解析 | 优先级错了表现为"请求打到不该打的那家"，日志里看不出来 |
+| `SimpleCircuitBreakerTest`（8） | 三态状态机、单探针 | 错了会表现为"莫名其妙拒绝所有请求"或"下游恢复了却不放开" |
+| `CostCalculatorTest`（7） | 微元换算、累加精度 | **金额算错是静默的**，没有断言可能几个月都发现不了 |
+
+### ★ 最重要的一个测试：缓存键一一映射
+
+最直觉的写法是用分隔符拼接字段。这个写法有 bug：
+
+```
+请求A: messages = [("user", "a\nmsg:assistant:b")]
+请求B: messages = [("user", "a"), ("assistant", "b")]
+
+两者拼出来完全相同："msg:user:a\nmsg:assistant:b\n"
+→ B 命中 A 的缓存，拿到别人的答案
+```
+
+prompt 里带换行太常见了，所以这不是理论问题。修法是**长度前缀**
+（`字段名[长度]:内容`），从语法上消除歧义。
+
+这个 bug 的危险性在于它**不报错、不打日志**，只在特定输入下悄悄返回错误数据。
+`ResponseCacheKeyTest` 用上面这两组输入做回归断言 —— **没有它，重构时极易改回去。**
+
+### 为什么没有 @SpringBootTest
+
+`pom.xml` 里有 `spring-boot-starter-test`，但项目刻意不用 Spring 上下文测试。
+原因：这类测试要起完整容器 + 数据库，单个用例几秒钟，
+跑一次要几十秒 —— 结果是**开发者不再本地跑测试**，测试就名存实亡了。
+
+真正需要端到端验证的场景（故障转移、限流原子性、缓存击穿），
+用并发脚本实测比写集成测试更有说服力：能拿到真实数字，而不只是"没报错"。
+
+---
 
 ### 为什么这一段是整个项目最有价值的部分
 

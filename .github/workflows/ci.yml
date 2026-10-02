@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: 单元测试
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          # 缓存 Maven 本地仓库，后续构建能快很多
+          cache: maven
+
+      - name: 运行测试
+        # 这些测试都是纯逻辑单元测试，不需要 MySQL / Redis ——
+        # 所以 CI 里不用起任何服务容器，构建很快。
+        #
+        # 这是刻意的设计：**把需要外部依赖的部分隔离开**，
+        # 让核心逻辑的验证成本降到最低。如果每个测试都要起数据库，
+        # 就没有人愿意在本地频繁跑了。
+        run: ./mvnw -B test
+
+      - name: 打包（验证完整构建可通过）
+        run: ./mvnw -B -DskipTests package
+
+      - name: 上传测试报告
+        # 测试失败时也要能拿到报告，所以用 always()
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          retention-days: 7
