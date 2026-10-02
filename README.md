@@ -10,12 +10,22 @@
 
 > 📌 项目范围、里程碑、验收标准见 **[docs/00-charter.md](docs/00-charter.md)**。动手前先看它。
 
+### 文档导航
+
+| 文档 | 内容 |
+|---|---|
+| [docs/00-charter.md](docs/00-charter.md) | 项目章程：范围、里程碑、验收标准、明确不做的事 |
+| [docs/05-llm-resilience.md](docs/05-llm-resilience.md) | 容错实验：9 种故障模式、实验协议、实测数据 |
+| [docs/07-loadtest.md](docs/07-loadtest.md) | 压测报告：测量边界、预热方法论、三组对比数据 |
+| [docs/08-resume.md](docs/08-resume.md) | 简历文案、逐条拆解、预设追问与不该写什么 |
+| [docs/screenshot-dashboard.png](docs/screenshot-dashboard.png) | 控制台截图 |
+
 ---
 
 ## 当前状态
 
-**已完成**：M1 最小可用网关 · M2 多供应商路由与故障转移 · M3 限流与配额 · M4 缓存与成本核算 · M5 可观测性与 Dashboard · M6 评测集与模型质量回归
-**进行中**：M7 压测、部署上线、简历文案
+**已完成**：M1–M6 全部里程碑 · 项目已开源上线
+**进行中**：M7 —— 压测报告 ✅ / 简历文案 ✅ / 面试追问准备 ⬜ / 部署文档 ⬜
 
 章节按时间倒序排列，最新的在前。
 

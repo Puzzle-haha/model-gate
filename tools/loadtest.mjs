@@ -23,6 +23,16 @@ const { values } = parseArgs({
     prompt: { type: 'string', default: '压测请求' },
     temperature: { type: 'string', default: '' },
     identical: { type: 'boolean', default: false },
+    /**
+     * 预热请求数（结果丢弃）。
+     *
+     * ⚠️ 这个参数不是可选的锦上添花，而是**压测正确性的前提**。
+     * JVM 在最初几百次请求里处于解释执行 + JIT 编译阶段，延迟可能是
+     * 稳态的十几倍。把它算进结果，你测的是"冷启动性能"，
+     * 却会当成"服务性能"来解读 —— 而且第一个跑的测试总是最惨的，
+     * 于是得出"缓存路径比不走缓存还慢"这种荒谬结论。
+     */
+    warmup: { type: 'string', default: '0' },
     timeout: { type: 'string', default: '120000' },
   },
   allowPositionals: true,
@@ -102,18 +112,35 @@ const wallStart = Date.now();
 
 // 用固定大小的 worker 池推进任务队列：既能拉满并发，又不会一次性创建
 // 几千个 Promise 把客户端自己压垮（压测工具本身不能成为瓶颈）。
-let cursor = 0;
-async function worker() {
-  while (true) {
-    const i = cursor++;
-    if (i >= total) return;
-    await one(i);
+async function runBatch(count) {
+  let cursor = 0;
+  async function worker() {
+    while (true) {
+      const i = cursor++;
+      if (i >= count) return;
+      await one(i);
+    }
   }
+  await Promise.all(Array.from({ length: Math.min(concurrency, count) }, worker));
 }
 
-await Promise.all(Array.from({ length: Math.min(concurrency, total) }, worker));
+// ---- 预热：跑完把统计清掉，不计入结果 ----
+const warmupCount = Number(values.warmup);
+if (warmupCount > 0) {
+  await runBatch(warmupCount);
+  statusCounts.clear();
+  latencies.length = 0;
+  networkErrors = 0;
+  allowed = 0;
+  rejected = 0;
+  retryAfterSamples.length = 0;
+  console.log(`[预热] 已完成 ${warmupCount} 次请求（结果已丢弃）`);
+  console.log('');
+}
 
-const wallMs = Date.now() - wallStart;
+const measuredStart = Date.now();
+await runBatch(total);
+const wallMs = Date.now() - measuredStart;
 const sorted = [...latencies].sort((a, b) => a - b);
 
 console.log('=== 压测结果 ===');
@@ -121,6 +148,7 @@ console.log(`目标        : ${url}`);
 console.log(`模型        : ${model}   调用方: ${apiKey}`);
 console.log(`请求数      : ${total}   并发: ${concurrency}`);
 console.log(`总耗时      : ${wallMs} ms`);
+console.log(`吞吐        : ${Math.round(total / (wallMs / 1000))} req/s`);
 console.log('');
 console.log('状态码分布:');
 for (const [status, count] of [...statusCounts.entries()].sort((a, b) => a[0] - b[0])) {
