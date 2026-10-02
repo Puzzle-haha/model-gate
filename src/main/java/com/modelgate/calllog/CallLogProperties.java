@@ -23,6 +23,14 @@ public class CallLogProperties {
     /** 队列空时的等待时间，避免空转烧 CPU。 */
     private long pollTimeoutMs = 1000;
 
+    /**
+     * 关闭时最多等多久把队列排空。
+     *
+     * 为什么必须有上限：如果数据库已经不可用，无限等待会让进程永远关不掉，
+     * 只能被 kill -9 —— 那反而会丢掉更多数据（连缓冲区带连接一起没）。
+     */
+    private long shutdownTimeoutMs = 5000;
+
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
 
@@ -34,4 +42,7 @@ public class CallLogProperties {
 
     public long getPollTimeoutMs() { return pollTimeoutMs; }
     public void setPollTimeoutMs(long pollTimeoutMs) { this.pollTimeoutMs = pollTimeoutMs; }
+
+    public long getShutdownTimeoutMs() { return shutdownTimeoutMs; }
+    public void setShutdownTimeoutMs(long shutdownTimeoutMs) { this.shutdownTimeoutMs = shutdownTimeoutMs; }
 }

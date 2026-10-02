@@ -132,20 +132,64 @@ public class CallLogWriter {
     }
 
     /**
-     * 关闭时尽力把队列写完，但不无限等待。
+     * 关闭时尽力把队列写完，但不超过 shutdownTimeoutMs。
      *
-     * 为什么设上限：如果数据库已经不可用，无限等待会让进程永远关不掉，
-     * 只能被 kill -9 —— 那反而会丢掉更多数据。
+     * ============================================================================
+     * ⚠️ 这里【绝不能一上来就 interrupt 工作线程】—— 这是一个真实修过的 bug
+     * ============================================================================
+     * 最初的实现是这样的：
+     *
+     *     running = false;
+     *     worker.interrupt();                    // ← 问题在这
+     *     while (!queue.isEmpty() && ...) sleep(100);
+     *
+     * 看起来是在"催促"它，实际效果完全相反：
+     *
+     *   drainLoop 的循环条件 `while (running || !queue.isEmpty())`
+     *   **本身就是优雅排空的路径** —— running=false 之后，它会继续把
+     *   队列里剩下的写完再退出。
+     *
+     *   但 interrupt() 会让它卡在 `queue.poll(timeout)` 上立刻抛
+     *   InterruptedException，被 catch 住后直接 break。
+     *   **于是队列里剩下的日志全部丢失。**
+     *
+     * 更糟的是后面那个等待循环：工作线程已经死了，没人再排空队列，
+     * 那个 while 只是白等满 5 秒，然后打一条"已停止"的日志，
+     * 看起来一切正常。
+     *
+     * 所以正确顺序是：
+     *   1. 只置 running=false，让它自然排空（可能是毫秒级）
+     *   2. join 等待，给一个上限
+     *   3. **只有真的超时了**才 interrupt 作为最后手段 ——
+     *      那时才说明下游（数据库）确实卡死了，丢数据已成定局
+     *
+     * 教训：**当一个结构已经有优雅退出路径时，"催促"它往往是破坏它。**
+     * 中断是"立刻停下"的语义，不是"快点做完"的语义。
      */
     @PreDestroy
     public void shutdown() {
         running = false;
-        worker.interrupt();
-        long deadline = System.currentTimeMillis() + 5000;
-        while (!queue.isEmpty() && System.currentTimeMillis() < deadline) {
-            sleepQuietly(100);
+
+        try {
+            // 等待工作线程自然排空。它会在队列为空后自行退出。
+            worker.join(props.getShutdownTimeoutMs());
+
+            if (worker.isAlive()) {
+                // 到这一步说明排空确实卡住了（比如数据库不可用）。
+                // 这时才强制中断 —— 丢数据已成定局，但当务之急是别让进程关不掉。
+                worker.interrupt();
+                log.warn("调用日志写入器未能在 {}ms 内排空，已强制中断；"
+                                + "队列中剩余 {} 条可能丢失",
+                        props.getShutdownTimeoutMs(), queue.size());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            worker.interrupt();
         }
-        log.info("调用日志写入器已停止: 已提交={} 已写入={} 已丢弃={} 写失败={}",
-                submitted.get(), written.get(), dropped.get(), writeFailures.get());
+
+        long lost = queue.size();
+        log.info("调用日志写入器已停止: 已提交={} 已写入={} 已丢弃={} 写失败={}{}",
+                submitted.get(), written.get(), dropped.get(), writeFailures.get(),
+                lost > 0 ? " 关闭时未落盘=" + lost : "");
     }
 }
