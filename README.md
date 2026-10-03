@@ -564,9 +564,20 @@ OpenAI 兼容入口 + Provider 抽象 + 调用日志 + Flyway 迁移。
 Copy-Item .env.example .env
 # 编辑 .env，填入数据库密码
 
-# 2. 启动
-.\run.ps1
+# 2. 启动（二选一）
+.\run.ps1              # 默认配置：可用模型 mock-*，够做故障注入实验
+.\run.ps1 -LocalTest   # 额外加载 tools/localtest.yml：接本地假上游，fake-* / eval-* 可用
 ```
+
+> `-LocalTest` 模式需要另开一个终端先跑 `node tools\fake-upstream.mjs`。
+> 两种模式的差别只是加载哪些供应商配置：默认模式只有 `MockProvider`（模型名 `mock-*`），
+> `-LocalTest` 再挂上指向假上游的供应商（模型名 `fake-*`、`eval-*`）。
+
+> ⚠️ **`run.ps1` 必须保存为「UTF-8 with BOM」。**
+> Windows PowerShell 5.1 对**没有 BOM** 的 `.ps1` 会按系统 ANSI（中文机器上是 GBK）解码，
+> 中文注释变乱码，错位的字节还可能被当成引号或大括号，直接语法报错。
+> 这不是理论问题——这个脚本曾因缺少 BOM 完全跑不起来，
+> 而报错信息（"字符串缺少终止符"）完全指不到真正的原因。
 
 ### Linux / macOS
 
