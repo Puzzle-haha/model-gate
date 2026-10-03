@@ -226,3 +226,13 @@ modelgate:
 logging:
   level:
     com.modelgate: DEBUG
+  # 除了打在终端，同时写一份到文件。
+  #
+  # 为什么需要：`run.ps1` 起的是【前台进程】，日志只在那个窗口里滚动，
+  # 窗口一关或滚屏超限就没了。而排查问题往往需要往前翻 ——
+  # 比如"刚才那次请求重试了几次、熔断了没有"。
+  #
+  # logs/ 已经在 .gitignore 里，不会误提交。
+  # Spring Boot 默认按大小滚动（单文件 10MB、保留 7 个），不用自己管。
+  file:
+    name: logs/modelgate.log
